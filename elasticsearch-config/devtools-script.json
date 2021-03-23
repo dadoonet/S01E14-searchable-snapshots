@@ -1,0 +1,199 @@
+# Using a preview version of 7.12 on cloud.elastic.co
+# Running on GCP
+GET /
+
+# Remove the old mounted index if exists
+DELETE demo-person-old
+
+# Using here a hot data tier and a cold data tier
+GET /_cat/nodes?v&h=name,disk.total,disk.used,heap.max&s=name
+
+# Create a service account for Google Cloud Storage at https://console.cloud.google.com/iam-admin/serviceaccounts
+# Download the service-account.json file to /tmp. It looks like this:
+#{
+#  "type": "service_account",
+#  "project_id": "PROJECT",
+#  "private_key_id": "PRIVATEKEY_ID",
+#  "private_key": "-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n",
+#  "client_email": "BUCKET@PROJECT.iam.gserviceaccount.com",
+#  "client_id": "CLIENT_ID",
+#  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+#  "token_uri": "https://oauth2.googleapis.com/token",
+#  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+#  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/BUCKET%40PROJECT.iam.gserviceaccount.com"
+#}
+
+# You must have created a client for Google Cloud Storage plugin
+# in the secured keystore
+# bin/elasticsearch-keystore add-file gcs.client.demo.credentials_file /tmp/service-account.json
+
+
+# Open the repository 
+# /app/management/data/snapshot_restore/repositories
+# You can register a new repository using the UI or the REST API
+PUT _snapshot/elastic-bytes
+{
+  "type": "gcs",
+  "settings": {
+    "bucket": "elastic-daily-bytes",
+    "client": "demo"
+  }
+}
+
+# Check the demo-person source index
+# Everything should have been indexed with the setup script
+# We have here a significant number of data
+GET /_cat/indices/demo-person*?v&h=index,pri,rep,docs.count,store.size&s=index
+
+# Before doing the snapshot, we want to make sure we have a minimal
+# number of segments
+POST /demo-person/_forcemerge?max_num_segments=1
+
+# We have to wait until it's done
+GET /_cat/tasks?v
+
+# Check the number of segments
+GET /_cat/segments/demo-person?v&h=index,shard,prirep,segment,docs.count,size
+
+# Check the snapshots we have
+GET /_cat/snapshots/elastic-bytes?v&h=id,status,duration,indices,total_shards
+
+# We can run the snapshot 
+PUT /_snapshot/elastic-bytes/demo
+{
+  "indices": "demo-person",
+  "include_global_state": false
+}
+
+# Check the snapshot is done
+GET /_cat/snapshots/elastic-bytes?v&h=id,status,duration,indices,total_shards
+
+# Mount the snapshot
+POST /_snapshot/elastic-bytes/demo/_mount
+{
+  "index": "demo-person",
+  "renamed_index": "demo-person-old"
+}
+
+# Shards are being started
+GET /_cat/shards/demo-person*/?v&h=index,shard,prirep,state,docs,store,node
+
+# Recovery is in progress
+GET /_cat/recovery/demo-person*/?v&h=index,time,type,stage,files_percent,bytes_recovered,bytes_percent
+
+# We can start querying our index while it's recovering
+# the primary shard behind the scene
+GET /demo-person-old/_count
+GET /demo-person-old/_search
+{
+  "query": {
+    "match": {
+      "name": "Joe"
+    }
+  }
+}
+
+# Searching in the local index is of course faster...
+GET /demo-person/_search
+{
+  "size": 0, 
+  "track_total_hits": true, 
+  "aggs": {
+    "country": {
+      "terms": {
+        "field": "address.country.keyword"
+      }
+    }
+  }
+}
+
+# Than searching in the snapshot. But if you run again
+# This search after some time, it will be a local shard
+GET /demo-person-old/_search
+{
+  "size": 0, 
+  "track_total_hits": true, 
+  "aggs": {
+    "country": {
+      "terms": {
+        "field": "address.country.keyword"
+      }
+    }
+  }
+}
+
+
+# Remove the old mounted index if exists
+DELETE demo-person-old
+
+# We are not going to recover anymore the shard locally
+# But we will be using a cache on a node which can cache data.
+# Set the following in elasticsearch.yml:
+# xpack.searchable.snapshot.shared_cache.size: 15gb
+POST /_snapshot/elastic-bytes/demo/_mount?storage=shared_cache
+{
+  "index": "demo-person",
+  "renamed_index": "demo-person-old"
+}
+
+# We can start querying our index while it's recovering
+# the primary shard behind the scene
+GET /demo-person-old/_count
+GET /demo-person-old/_search
+{
+  "query": {
+    "match": {
+      "name": "Joe"
+    }
+  }
+}
+GET /demo-person-old/_search
+{
+  "size": 0, 
+  "track_total_hits": true, 
+  "aggs": {
+    "country": {
+      "terms": {
+        "field": "address.country.keyword"
+      }
+    }
+  }
+}
+
+# We can see our shard using 0b on disk
+GET /_cat/shards/demo-person*/?v&h=index,shard,prirep,state,docs,store,node
+
+# No recovery in progress this time
+GET /_cat/recovery/demo-person*/?v&h=index,time,type,stage,files_percent,bytes_recovered,bytes_percent
+
+# We see all our data (the local and the snapshot)
+GET /demo-person*/_search
+{
+  "size": 0, 
+  "track_total_hits": true,
+  "query": {
+    "match": {
+      "name": "Joe"
+    }
+  },
+  "aggs": {
+    "index": {
+      "terms": {
+        "field": "_index"
+      },
+      "aggs": {
+        "hits": {
+          "top_hits": {
+            "size": 1
+          }
+        },
+        "country": {
+          "terms": {
+            "field": "address.country.keyword"
+          }
+        }
+      }
+    }
+  }
+}
+
