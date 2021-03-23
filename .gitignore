@@ -1,0 +1,5 @@
+# Ignore the Cloud credentials if any is available locally
+.cloud
+
+# Ignore files transformed on the fly
+dataset/bulk-person.ndjson
