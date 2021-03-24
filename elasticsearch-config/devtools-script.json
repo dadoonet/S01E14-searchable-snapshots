@@ -1,9 +1,4 @@
-# Using a preview version of 7.12 on cloud.elastic.co
-# Running on GCP
-GET /
-
-# Remove the old mounted index if exists
-DELETE demo-person-old
+## Our setup
 
 # Using here a hot data tier and a cold data tier
 GET /_cat/nodes?v&h=name,disk.total,disk.used,heap.max&s=name
@@ -27,6 +22,32 @@ GET /_cat/nodes?v&h=name,disk.total,disk.used,heap.max&s=name
 # in the secured keystore
 # bin/elasticsearch-keystore add-file gcs.client.demo.credentials_file /tmp/service-account.json
 
+## Snapshot (aka Backup) the data
+
+# Check the demo-person source index
+# We have here a significant number of data
+GET /_cat/indices/demo-person*?v&h=index,health,pri,rep,docs.count,store.size,pri.store.size&s=index
+
+# Everything should have been indexed with the setup script
+# If not, you can restore the 'demo-backup' if exists
+#DELETE /demo-person
+#POST /_snapshot/elastic-bytes/demo-backup/_restore
+# Recovery is in progress
+#GET /_cat/recovery/demo-person*/?v&h=index,time,type,stage,files_percent,bytes_recovered,bytes_percent
+#PUT demo-person/_settings
+#{
+#  "number_of_replicas": 1
+#}
+
+# Before doing the snapshot, we want to make sure we have a minimal
+# number of segments
+POST /demo-person/_forcemerge?max_num_segments=1
+
+# We have to wait until it's done
+GET /_cat/tasks?v
+
+# Check the number of segments
+GET /_cat/segments/demo-person?v&h=index,shard,prirep,segment,docs.count,size
 
 # Open the repository 
 # /app/management/data/snapshot_restore/repositories
@@ -40,24 +61,6 @@ PUT _snapshot/elastic-bytes
   }
 }
 
-# Check the demo-person source index
-# Everything should have been indexed with the setup script
-# We have here a significant number of data
-GET /_cat/indices/demo-person*?v&h=index,pri,rep,docs.count,store.size&s=index
-
-# Before doing the snapshot, we want to make sure we have a minimal
-# number of segments
-POST /demo-person/_forcemerge?max_num_segments=1
-
-# We have to wait until it's done
-GET /_cat/tasks?v
-
-# Check the number of segments
-GET /_cat/segments/demo-person?v&h=index,shard,prirep,segment,docs.count,size
-
-# Check the snapshots we have
-GET /_cat/snapshots/elastic-bytes?v&h=id,status,duration,indices,total_shards
-
 # We can run the snapshot 
 PUT /_snapshot/elastic-bytes/demo
 {
@@ -68,11 +71,32 @@ PUT /_snapshot/elastic-bytes/demo
 # Check the snapshot is done
 GET /_cat/snapshots/elastic-bytes?v&h=id,status,duration,indices,total_shards
 
+# Recover the existing backup to index demo-person-fullrestore
+POST /_snapshot/elastic-bytes/demo/_restore
+{
+  "indices": "demo-person",
+  "rename_pattern": "demo-person",
+  "rename_replacement": "demo-person-fullrestore"
+}
+# Recovery is in progress
+GET /_cat/recovery/demo-person*/?v&h=index,time,type,stage,files_percent,bytes_recovered,bytes_percent
+
+# This is failing because the shard have not recovered yet
+GET /demo-person-fullrestore/_search
+
+# We don't see any data yet
+GET /_cat/indices/demo-person*?v&h=index,health,pri,rep,docs.count,store.size&s=index
+
+# We don't want to wait, so let's cancel the restore operation
+DELETE /demo-person-fullrestore
+
+## Recover primary shards from the snapshot (consider the snapshot as replica shards)
+
 # Mount the snapshot
 POST /_snapshot/elastic-bytes/demo/_mount
 {
   "index": "demo-person",
-  "renamed_index": "demo-person-old"
+  "renamed_index": "demo-person-mounted"
 }
 
 # Shards are being started
@@ -83,8 +107,8 @@ GET /_cat/recovery/demo-person*/?v&h=index,time,type,stage,files_percent,bytes_r
 
 # We can start querying our index while it's recovering
 # the primary shard behind the scene
-GET /demo-person-old/_count
-GET /demo-person-old/_search
+GET /demo-person-mounted/_count
+GET /demo-person-mounted/_search
 {
   "query": {
     "match": {
@@ -109,7 +133,7 @@ GET /demo-person/_search
 
 # Than searching in the snapshot. But if you run again
 # This search after some time, it will be a local shard
-GET /demo-person-old/_search
+GET /demo-person-mounted/_search
 {
   "size": 0, 
   "track_total_hits": true, 
@@ -122,9 +146,10 @@ GET /demo-person-old/_search
   }
 }
 
+## Search directly from the snapshot (new in 7.12)
 
 # Remove the old mounted index if exists
-DELETE demo-person-old
+DELETE demo-person-mounted
 
 # We are not going to recover anymore the shard locally
 # But we will be using a cache on a node which can cache data.
@@ -133,13 +158,13 @@ DELETE demo-person-old
 POST /_snapshot/elastic-bytes/demo/_mount?storage=shared_cache
 {
   "index": "demo-person",
-  "renamed_index": "demo-person-old"
+  "renamed_index": "demo-person-mounted"
 }
 
-# We can start querying our index while it's recovering
-# the primary shard behind the scene
-GET /demo-person-old/_count
-GET /demo-person-old/_search
+# We can start querying.
+# It's caching files in data nodes behind the scene
+GET /demo-person-mounted/_count
+GET /demo-person-mounted/_search
 {
   "query": {
     "match": {
@@ -147,9 +172,9 @@ GET /demo-person-old/_search
     }
   }
 }
-GET /demo-person-old/_search
+GET /demo-person-mounted/_search
 {
-  "size": 0, 
+  "size": 0,
   "track_total_hits": true, 
   "aggs": {
     "country": {

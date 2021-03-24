@@ -101,8 +101,10 @@ echo "### Configure Cloud Services ###"
 echo "################################"
 echo -ne '\n'
 
-curl_delete "$ELASTICSEARCH_URL/demo-person-old"
+curl_delete "$ELASTICSEARCH_URL/demo-person-mounted"
+curl_delete "$ELASTICSEARCH_URL/demo-person-fullrestore"
 curl_delete "$ELASTICSEARCH_URL/_snapshot/elastic-bytes/demo"
+curl_delete "$ELASTICSEARCH_URL/_snapshot/elastic-bytes"
 
 echo -ne '\n'
 echo "#####################################"
@@ -110,22 +112,25 @@ echo "### Initialize the person Dataset ###"
 echo "#####################################"
 echo -ne '\n'
 
-echo "Creating index demo-person if needed"
-curl_put "$ELASTICSEARCH_URL/demo-person" "elasticsearch-config/demo-person.json"
-
-if [ ! -e $DATASOURCE_DIR/bulk-person.ndjson ] ; then
-  echo "Generating the bulk request"
-	# It has been generated using the person injector (not public though)
-	# java -jar injector-7.0.jar --console --nb 10000 > $DATASOURCE_DIR/persons.json
-	cat $DATASOURCE_DIR/persons.json | jq --slurp -c '.[] | { index : {  }}, { name: .name, dateofbirth: .dateofbirth, address: .address }' > $DATASOURCE_DIR/bulk-person.ndjson
-fi
-
 echo "Ingesting $NUM_OF_RUNS times 10 000 persons"
-for i in $(seq 1 $NUM_OF_RUNS)
-do
-	echo "-> Run $i"
-	curl -XPOST "$ELASTICSEARCH_URL/demo-person/_bulk" -s -u elastic:$ELASTIC_PASSWORD -H 'Content-Type: application/x-ndjson' --data-binary "@$DATASOURCE_DIR/bulk-person.ndjson" | jq '{took: .took, errors: .errors}' ; echo
-done
+
+if (( $NUM_OF_RUNS > 0 )); then
+	echo "Creating index demo-person if needed"
+	curl_put "$ELASTICSEARCH_URL/demo-person" "elasticsearch-config/demo-person.json"
+
+	if [ ! -e $DATASOURCE_DIR/bulk-person.ndjson ] ; then
+	  echo "Generating the bulk request"
+		# It has been generated using the person injector (not public though)
+		# java -jar injector-7.0.jar --console --nb 10000 > $DATASOURCE_DIR/persons.json
+		cat $DATASOURCE_DIR/persons.json | jq --slurp -c '.[] | { index : {  }}, { name: .name, dateofbirth: .dateofbirth, address: .address }' > $DATASOURCE_DIR/bulk-person.ndjson
+	fi
+
+	for i in $(seq 1 $NUM_OF_RUNS)
+	do
+		echo "-> Run $i"
+		curl -XPOST "$ELASTICSEARCH_URL/demo-person/_bulk" -s -u elastic:$ELASTIC_PASSWORD -H 'Content-Type: application/x-ndjson' --data-binary "@$DATASOURCE_DIR/bulk-person.ndjson" | jq '{took: .took, errors: .errors}' ; echo
+	done
+fi
 
 echo -ne '\n'
 echo "#############################"
