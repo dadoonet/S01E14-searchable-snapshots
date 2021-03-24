@@ -3,3 +3,6 @@
 
 # Ignore files transformed on the fly
 dataset/bulk-person.ndjson
+
+# Ignore the GCS credentials
+elasticsearch-config/service-account.json
