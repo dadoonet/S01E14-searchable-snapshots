@@ -3,12 +3,17 @@ version: '3'
 services:
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:$ELASTIC_VERSION
+    build:
+      context: .
+      args:
+        VERSION: $ELASTIC_VERSION
     environment:
       - bootstrap.memory_lock=true
       - discovery.type=single-node
       - ELASTIC_PASSWORD=$ELASTIC_PASSWORD
       - xpack.security.enabled=true
+      - xpack.license.self_generated.type=trial
+      - xpack.searchable.snapshot.shared_cache.size=5gb
     ulimits:
       memlock:
         soft: -1

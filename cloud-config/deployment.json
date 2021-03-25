@@ -1,0 +1,166 @@
+POST /api/v1/deployments?validate_only=false
+{
+  "resources": {
+    "elasticsearch": [
+      {
+        "region": "gcp-europe-west1",
+        "settings": {
+          "dedicated_masters_threshold": 6
+        },
+        "plan": {
+          "autoscaling_enabled": false,
+          "cluster_topology": [
+            {
+              "zone_count": 2,
+              "instance_configuration_id": "gcp.coordinating.1",
+              "node_roles": [
+                "ingest",
+                "remote_cluster_client"
+              ],
+              "id": "coordinating",
+              "size": {
+                "resource": "memory",
+                "value": 0
+              },
+              "elasticsearch": {
+                "enabled_built_in_plugins": []
+              }
+            },
+            {
+              "zone_count": 2,
+              "elasticsearch": {
+                "node_attributes": {
+                  "data": "hot"
+                },
+                "enabled_built_in_plugins": []
+              },
+              "instance_configuration_id": "gcp.data.highio.1",
+              "node_roles": [
+                "master",
+                "ingest",
+                "remote_cluster_client",
+                "data_hot",
+                "transform",
+                "data_content"
+              ],
+              "id": "hot_content",
+              "size": {
+                "resource": "memory",
+                "value": 8192
+              }
+            },
+            {
+              "zone_count": 2,
+              "elasticsearch": {
+                "node_attributes": {
+                  "data": "warm"
+                },
+                "enabled_built_in_plugins": []
+              },
+              "instance_configuration_id": "gcp.data.highstorage.1",
+              "node_roles": [
+                "data_warm",
+                "remote_cluster_client"
+              ],
+              "id": "warm",
+              "size": {
+                "resource": "memory",
+                "value": 0
+              }
+            },
+            {
+              "zone_count": 2,
+              "elasticsearch": {
+                "node_attributes": {
+                  "data": "cold"
+                },
+                "enabled_built_in_plugins": [],
+                "user_settings_yaml": "xpack.searchable.snapshot.shared_cache.size: 15gb"
+              },
+              "instance_configuration_id": "gcp.data.highstorage.1",
+              "node_roles": [
+                "data_cold",
+                "remote_cluster_client"
+              ],
+              "id": "cold",
+              "size": {
+                "value": 4096,
+                "resource": "memory"
+              }
+            },
+            {
+              "zone_count": 3,
+              "instance_configuration_id": "gcp.master.1",
+              "node_roles": [
+                "master",
+                "remote_cluster_client"
+              ],
+              "id": "master",
+              "size": {
+                "resource": "memory",
+                "value": 0
+              },
+              "elasticsearch": {
+                "enabled_built_in_plugins": []
+              }
+            },
+            {
+              "zone_count": 1,
+              "instance_configuration_id": "gcp.ml.1",
+              "node_roles": [
+                "ml",
+                "remote_cluster_client"
+              ],
+              "id": "ml",
+              "size": {
+                "resource": "memory",
+                "value": 0
+              },
+              "elasticsearch": {
+                "enabled_built_in_plugins": []
+              }
+            }
+          ],
+          "elasticsearch": {
+            "version": "7.12.0"
+          },
+          "deployment_template": {
+            "id": "gcp-io-optimized"
+          },
+          "transient": {
+            "restore_snapshot": null
+          }
+        },
+        "ref_id": "main-elasticsearch"
+      }
+    ],
+    "enterprise_search": [],
+    "kibana": [
+      {
+        "elasticsearch_cluster_ref_id": "main-elasticsearch",
+        "region": "gcp-europe-west1",
+        "plan": {
+          "cluster_topology": [
+            {
+              "instance_configuration_id": "gcp.kibana.1",
+              "zone_count": 1,
+              "size": {
+                "resource": "memory",
+                "value": 1024
+              }
+            }
+          ],
+          "kibana": {
+            "version": "7.12.0"
+          }
+        },
+        "ref_id": "main-kibana"
+      }
+    ],
+    "apm": []
+  },
+  "name": "elastic-byte-gcp",
+  "metadata": {
+    "system_owned": false
+  }
+}
